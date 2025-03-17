@@ -16,66 +16,87 @@
 
 package com.example.android.pictureinpicture
 
-import android.os.SystemClock
-import androidx.lifecycle.LiveData
-import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
-import androidx.lifecycle.map
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.CoroutineScope
+import com.example.android.pictureinpicture.repository.TimeRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.android.awaitFrame
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.time.Duration
 
-class MainViewModel: ViewModel() {
+// TODO: Repository should be injected via DI instead
+class MainViewModel(
+    private val repository: TimeRepository,
+    private val clock: FakeClock
+) : ViewModel() {
 
     private var job: Job? = null
 
-    private var startUptimeMillis = SystemClock.uptimeMillis()
-    private val timeMillis = MutableLiveData(0L)
+    private val timeMillis: StateFlow<Long> = repository.getTimeMillis()
+    val started: StateFlow<Boolean> = repository.getStarted()
 
-    private val _started = MutableLiveData(false)
+    val time: StateFlow<String> = timeMillis.map { millis -> formatTime(millis) }.stateIn(
+        viewModelScope,
+        SharingStarted.Lazily,
+        formatTime(timeMillis.value)
+    )
 
-    val started: LiveData<Boolean> = _started
-    val time = timeMillis.map { millis ->
-        val minutes = millis / 1000 / 60
-        val m = minutes.toString().padStart(2, '0')
-        val seconds = (millis / 1000) % 60
-        val s = seconds.toString().padStart(2, '0')
-        val hundredths = (millis % 1000) / 10
-        val h = hundredths.toString().padStart(2, '0')
-        "$m:$s:$h"
+     //to check if the timer needs to be started based on started value
+    init {
+        if (started.value) {
+            start()
+        }
     }
 
     /**
      * Starts the stopwatch if it is not yet started, or pauses it if it is already started.
      */
     fun startOrPause() {
-        if (_started.value == true) {
-            _started.value = false
+        if (started.value) {
+            repository.setStarted(false)
             job?.cancel()
         } else {
-            _started.value = true
-            job = viewModelScope.launch { start() }
+            repository.setStarted(true)
+            start()
         }
     }
 
-    private suspend fun CoroutineScope.start() {
-        startUptimeMillis = SystemClock.uptimeMillis() - (timeMillis.value ?: 0L)
-        while (isActive) {
-            timeMillis.value = SystemClock.uptimeMillis() - startUptimeMillis
-            // Updates on every render frame.
-            awaitFrame()
+    private fun start() {
+        job = viewModelScope.launch {
+            val startUptimeMillis = clock.uptimeMillis() - timeMillis.value
+            while (isActive) {
+                repository.setTimeMillis(clock.uptimeMillis() - startUptimeMillis)
+                awaitFrame()
+            }
         }
     }
+
 
     /**
      * Clears the stopwatch to 00:00:00.
      */
     fun clear() {
-        startUptimeMillis = SystemClock.uptimeMillis()
-        timeMillis.value = 0L
+        repository.setTimeMillis(0L)
+    }
+
+    // Moved the time format into method. Could been moved to extension function
+    private fun formatTime(millis: Long): String {
+        val minutes = millis / 1000 / 60
+        val m = minutes.toString().padStart(2, '0')
+        val seconds = (millis / 1000) % 60
+        val s = seconds.toString().padStart(2, '0')
+        val hundredths = (millis % 1000) / 10
+        val h = hundredths.toString().padStart(2, '0')
+        return "$m:$s:$h"
     }
 }
+
+
+
+
+
+

@@ -37,6 +37,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.example.android.pictureinpicture.databinding.MainActivityBinding
+import com.example.android.pictureinpicture.factory.MainViewModelFactory
+import com.example.android.pictureinpicture.repository.TimeRepository
+import com.example.android.pictureinpicture.repository.TimerRepositoryImpl
 import kotlinx.coroutines.launch
 
 /** Intent action for stopwatch controls from Picture-in-Picture mode.  */
@@ -55,9 +58,11 @@ private const val REQUEST_START_OR_PAUSE = 4
  */
 class MainActivity : AppCompatActivity() {
 
-    private val viewModel: MainViewModel by viewModels()
     private lateinit var binding: MainActivityBinding
-
+    private val repository: TimeRepository = TimerRepositoryImpl.getInstance
+    private val viewModel: MainViewModel by viewModels {
+        MainViewModelFactory(repository, CustomClock())
+    }
     /**
      * A [BroadcastReceiver] for handling action items on the picture-in-picture mode.
      */
@@ -79,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         binding = MainActivityBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
         // Event handlers
         binding.clear.setOnClickListener { viewModel.clear() }
         binding.startOrPause.setOnClickListener { viewModel.startOrPause() }
@@ -90,13 +96,21 @@ class MainActivity : AppCompatActivity() {
             finish()
         }
         // Observe data from the viewModel.
-        viewModel.time.observe(this) { time -> binding.time.text = time }
-        viewModel.started.observe(this) { started ->
-            binding.startOrPause.setImageResource(
-                if (started) R.drawable.ic_pause_24dp else R.drawable.ic_play_arrow_24dp
-            )
-            updatePictureInPictureParams(started)
+        lifecycleScope.launch {
+            viewModel.time.collect { time ->
+                binding.time.text = time
+            }
         }
+
+        lifecycleScope.launch {
+            viewModel.started.collect { started ->
+                binding.startOrPause.setImageResource(
+                    if (started) R.drawable.ic_pause_24dp else R.drawable.ic_play_arrow_24dp
+                )
+                updatePictureInPictureParams(started)
+            }
+        }
+
 
         // Use trackPipAnimationHint view to make a smooth enter/exit pip transition.
         // See https://android.devsite.corp.google.com/develop/ui/views/picture-in-picture#smoother-transition
